@@ -1,8 +1,15 @@
-# TRASHURY AI — Waste Classification & Carbon Reduction Model
+# TRASHURY AI — Waste Classification & Carbon Reduction Models
 
 Repositori khusus untuk **Model Kecerdasan Buatan (Computer Vision & Estimasi Reduksi Emisi $\text{CO}_2\text{e}$)** pada ekosistem **TRASHURY** (*Offline-First Community Waste Bank System*).
 
-Model dilatih menggunakan pendekatan *Two-Stage Fine-Tuning* pada **EfficientNet-B2** (resolusi `260×260`) untuk mengklasifikasikan **12 kategori sampah rumah tangga**, kemudian diekspor menjadi satu berkas utuh berformat **ONNX** agar dapat dijalankan secara *offline* di berbagai platform (Python, Node.js, maupun Web Browser via `onnxruntime-web`).
+Repositori ini menyediakan **dua mode arsitektur AI** untuk mengklasifikasikan **12 kategori sampah rumah tangga** dalam format **ONNX**:
+
+1. **Mode 1 — High-Accuracy Server/Cloud (`SigLIP-SO400M + ResMLP / MLP2 Ensemble`)** 🏆  
+   * **Test Accuracy:** **`96.03%`** | **Test Macro F1:** **`0.9644`** (pada `353` citra uji, seluruh 12 kelas memiliki F1 $\ge 0.90$).
+   * Memanfaatkan *Frozen Vision Encoder* `google/siglip-so400m-patch14-384` (`1152`-dim) dengan *Feature-Space Mixup*, `RMSNorm`, dan *Multi-Seed Ensemble*.
+2. **Mode 2 — Lightweight Edge Offline PWA (`EfficientNet-B2`)** ⚡  
+   * **Test Accuracy (TTA):** **`88.89%`** | **Valid Accuracy:** **`92.75%`** | **Ukuran:** **`29.41 MB`** (1 berkas `.onnx` utuh).
+   * Dirancang ringan agar berjalan 100% *offline* di peramban kasir PWA via `onnxruntime-web`.
 
 ---
 
@@ -10,15 +17,18 @@ Model dilatih menggunakan pendekatan *Two-Stage Fine-Tuning* pada **EfficientNet
 
 ```text
 trashury-ai-model/
-├── README.md                              # Dokumentasi model, evaluasi, dan panduan penggunaan
+├── README.md                              # Dokumentasi arsitektur, evaluasi, dan panduan penggunaan
 ├── requirements.txt                       # Dependensi Python untuk training & inferensi
 ├── .gitignore                             # Konfigurasi file yang diabaikan Git
-├── inference.py                           # Skrip Python siap pakai untuk uji inferensi gambar (.onnx)
+├── inference.py                           # Skrip Python CLI untuk inferensi (--mode edge | --mode siglip)
 ├── models/
-│   ├── klasifikasi-sampah-v3.onnx         # Model ONNX tunggal (EfficientNet-B2, 29.41 MB)
+│   ├── klasifikasi-sampah-v3.onnx         # Mode 2 (Edge): EfficientNet-B2 ONNX tunggal (29.41 MB)
+│   ├── siglip_ens_mlp2_head.onnx          # Mode 1 (SigLIP): Head ONNX Multi-Seed MLP2 + Norm (12.59 MB)
+│   ├── siglip_heads_checkpoints.zip       # Mode 1 (SigLIP): 5 checkpoint PyTorch (.pt) seed 42..46
 │   └── labels.txt                         # Daftar 12 kelas urutan indeks output (0..11)
 └── notebooks/
-    └── Trashury_v3.ipynb                  # Notebook training Two-Stage Fine-Tuning, TTA, & ekspor ONNX
+    ├── Trashury_SigLIP_Probe.ipynb        # Notebook training & evaluasi SigLIP-SO400M + ResMLP/MLP2 (96.03%)
+    └── Trashury_v3.ipynb                  # Notebook training EfficientNet-B2 Two-Stage Fine-Tuning (88.89%)
 ```
 
 ---
@@ -42,48 +52,47 @@ trashury-ai-model/
 
 ---
 
-## 3. Hasil Perbandingan Arsitektur & Evaluasi (`v3` Two-Stage Fine-Tuning)
+## 3. Ringkasan Evaluasi & Perbandingan Model
 
-Dilakukan eksperimen perbandingan tiga arsitektur keluarga EfficientNet pada resolusi `260×260` menggunakan *Two-Stage Fine-Tuning*, `AdamW`, `CosineAnnealingLR`, `Label Smoothing (0.1)`, serta evaluasi *Test-Time Augmentation (TTA)* pada dataset 2.418 citra sampah (`1556 train / 400 valid / 207 test`):
+### Mode 1: High-Accuracy `SigLIP-SO400M + ResMLP / MLP2` (`3.164` Citra: Roboflow + TrashBox `70/15/15`)
+* **Dataset:** `2.259` train (multi-view embedding), `552` valid, `353` test (bebas duplikat `dHash` 8×8).
+* **Valid Accuracy / Macro F1:** **`96.56%`** / **`0.9661`** (`ResMLP`) | **`96.20%`** / **`0.9642`** (`Multi-Seed MLP2`).
+* **Test Accuracy / Macro F1:** **`96.03%`** / **`0.9644`** (naik **`+7.14%`** dibanding `EfficientNet-B2`).
+
+| Kategori Sampah | Precision | Recall | F1-Score | Support |
+|---|:---:|:---:|:---:|:---:|
+| **Cardboard Boxes** | 1.00 | 1.00 | **1.00** | 32 |
+| **Glass Bottles** | 0.97 | 0.92 | **0.94** | 36 |
+| **Glass Shards** | 1.00 | 1.00 | **1.00** | 12 |
+| **Jug** | 0.97 | 1.00 | **0.99** | 35 |
+| **Metal Can** | 1.00 | 0.97 | **0.99** | 40 |
+| **Paper** | 0.97 | 1.00 | **0.98** | 32 |
+| **Paper Bag** | 1.00 | 0.95 | **0.98** | 22 |
+| **Paper Cup** | 0.90 | 1.00 | **0.95** | 37 |
+| **Plastic Bottle** | 0.88 | 0.93 | **0.90** | 30 |
+| **Plastic Cup** | 0.97 | 0.89 | **0.93** | 38 |
+| **Plastic bag** | 0.93 | 0.90 | **0.91** | 29 |
+| **food waste** | 1.00 | 1.00 | **1.00** | 10 |
+| **Rata-rata Makro / Akurasi** | **0.97** | **0.96** | **0.96** | **353** |
+
+---
+
+### Mode 2: Lightweight Edge `EfficientNet-B2` (`2.163` Citra Roboflow, `260×260` Two-Stage Fine-Tuning)
 
 | Arsitektur | Valid Acc | Test Std | **Test TTA** | Ukuran (`.pth`) | Latency (GPU) | Status |
 |---|:---:|:---:|:---:|:---:|:---:|---|
 | **EfficientNet-B0** | $92.75\%$ | $86.47\%$ | $86.96\%$ | $15.64\text{ MB}$ | $1.23\text{ ms}$ | Kandidat |
-| **EfficientNet-B2** | $92.75\%$ | **$88.41\%$** | **$88.89\%$** | $29.88\text{ MB}$ | **$1.00\text{ ms}$** | **Model Terpilih** 🏆 |
+| **EfficientNet-B2** | $92.75\%$ | **$88.41\%$** | **$88.89\%$** | $29.88\text{ MB}$ | **$1.00\text{ ms}$** | **Model Edge Terpilih** ⚡ |
 | **EfficientNetV2-S** | $95.00\%$ | $87.44\%$ | $87.92\%$ | $77.90\text{ MB}$ | $1.11\text{ ms}$ | Kandidat |
-
-**Alasan Pemilihan:** **EfficientNet-B2** memberikan akurasi generalisasi terbaik pada data uji nyata (**88.89%** Test Accuracy + TTA) dengan ukuran berkas ONNX tunggal yang ramping (**29.41 MB**).
-
-### Rincian Evaluasi per Kelas (`EfficientNet-B2` — Test Set + TTA)
-
-| Kategori Sampah | Precision | Recall | F1-Score | Support |
-|---|:---:|:---:|:---:|:---:|
-| **Cardboard Boxes** | 0.91 | 0.91 | 0.91 | 22 |
-| **Glass Bottles** | 0.76 | 0.81 | 0.79 | 16 |
-| **Glass Shards** | 1.00 | 1.00 | 1.00 | 12 |
-| **Jug** | 0.93 | 0.93 | 0.93 | 15 |
-| **Metal Can** | 0.93 | 0.96 | 0.94 | 26 |
-| **Paper** | 0.75 | 0.75 | 0.75 | 12 |
-| **Paper Bag** | 0.91 | 0.95 | 0.93 | 22 |
-| **Paper Cup** | 0.79 | 0.88 | 0.83 | 17 |
-| **Plastic Bottle** | 0.87 | 0.83 | 0.85 | 24 |
-| **Plastic Cup** | 0.95 | 0.82 | 0.88 | 22 |
-| **Plastic bag** | 0.89 | 0.89 | 0.89 | 9 |
-| **food waste** | 1.00 | 0.90 | 0.95 | 10 |
-| **Rata-rata Makro / Akurasi** | **0.89** | **0.89** | **0.89** | **207** |
 
 ---
 
-## 4. Spesifikasi Teknis Model ONNX
+## 4. Spesifikasi Teknis ONNX
 
-* **Berkas Model:** `models/klasifikasi-sampah-v3.onnx` (`29.41 MB`, 1 berkas utuh dengan `export_params=True` & `dynamo=False`)
-* **Input Tensor:**
-  * Nama: `"input"`
-  * Shape: `[batch_size, 3, 260, 260]` (`float32`, format channel `RGB` / `NCHW`)
-  * Normalisasi: `mean = [0.485, 0.456, 0.406]`, `std = [0.229, 0.224, 0.225]`
-* **Output Tensor:**
-  * Nama: `"output"`
-  * Shape: `[batch_size, 12]` (`float32`, *raw logits* — aplikasikan fungsi **Softmax** untuk mendapatkan probabilitas $0..1$).
+| Mode | File ONNX | Input Tensor | Output Tensor |
+|---|---|---|---|
+| **Edge (`EfficientNet-B2`)** | `models/klasifikasi-sampah-v3.onnx` (`29.41 MB`) | `input`: `[batch, 3, 260, 260]` (`RGB`, normalisasi ImageNet) | `output`: `[batch, 12]` (*raw logits*, gunakan **Softmax**) |
+| **SigLIP Head (`MLP2 Ensemble`)** | `models/siglip_ens_mlp2_head.onnx` (`12.59 MB`) | `embedding`: `[batch, 1152]` (output `SiglipVisionModel`) | `probabilities`: `[batch, 12]` (sudah Softmax rata-rata 5 seed) |
 
 ---
 
@@ -93,8 +102,11 @@ Dilakukan eksperimen perbandingan tiga arsitektur keluarga EfficientNet pada res
 # 1. Install dependensi
 pip install -r requirements.txt
 
-# 2. Jalankan prediksi pada gambar sampah (beserta simulasi berat kg)
-python inference.py --image contoh_sampah.jpg --berat 2.5
+# 2. Mode Edge Offline (EfficientNet-B2 — ringan, langsung dari gambar)
+python inference.py --mode edge --image contoh_sampah.jpg --berat 2.5
+
+# 3. Mode High-Accuracy (SigLIP-SO400M + Multi-Seed MLP2 Head)
+python inference.py --mode siglip --image contoh_sampah.jpg --berat 2.5
 ```
 
 ---

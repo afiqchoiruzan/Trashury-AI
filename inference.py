@@ -26,14 +26,12 @@ MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
-def preprocess_image(image_path: str) -> np.ndarray:
-    """Membaca gambar, mengubah ukuran ke 260x260, dan menerapkan normalisasi ImageNet."""
+def preprocess_image_edge(image_path: str) -> np.ndarray:
+    """Membaca gambar, mengubah ukuran ke 260x260, dan menerapkan normalisasi ImageNet untuk EfficientNet-B2."""
     img = Image.open(image_path).convert("RGB").resize((260, 260))
     arr = np.asarray(img, dtype=np.float32) / 255.0
     arr = (arr - MEAN) / STD
-    # Ubah dari HWC (260, 260, 3) ke NCHW (1, 3, 260, 260)
-    tensor = np.transpose(arr, (2, 0, 1))[np.newaxis, ...]
-    return tensor
+    return np.transpose(arr, (2, 0, 1))[np.newaxis, ...]
 
 
 def softmax(logits: np.ndarray) -> np.ndarray:
@@ -41,22 +39,31 @@ def softmax(logits: np.ndarray) -> np.ndarray:
     return exp_scores / np.sum(exp_scores)
 
 
-def prediksi_sampah(
+def extract_siglip_embedding(
     image_path: str,
-    model_path: str = "models/klasifikasi-sampah-v3.onnx",
-    berat_kg: float = 1.0,
-    top_k: int = 3,
-) -> dict[str, Any]:
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"File model tidak ditemukan: {model_path}")
+    backbone_id: str = "google/siglip-so400m-patch14-384",
+) -> np.ndarray:
+    """Mengekstrak embedding 1152-dim menggunakan Frozen SigLIP-SO400M Vision Model."""
+    import torch
+    from torchvision import transforms
+    from transformers import SiglipImageProcessor, SiglipVisionModel
 
-    session = ort.InferenceSession(model_path)
-    input_name = session.get_inputs()[0].name
-    tensor = preprocess_image(image_path)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    proc = SiglipImageProcessor.from_pretrained(backbone_id)
+    vision_model = SiglipVisionModel.from_pretrained(backbone_id).to(device).eval()
 
-    logits = session.run(None, {input_name: tensor})[0][0]
-    probs = softmax(logits)
+    tf = transforms.Compose([
+        transforms.Resize((384, 384), interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=proc.image_mean, std=proc.image_std),
+    ])
+    img_tensor = tf(Image.open(image_path).convert("RGB")).unsqueeze(0).to(device)
+    with torch.inference_mode():
+        emb = vision_model(pixel_values=img_tensor).pooler_output.float().cpu().numpy()
+    return emb
 
+
+def _format_hasil(probs: np.ndarray, berat_kg: float, top_k: int) -> dict[str, Any]:
     urut_idx = np.argsort(probs)[::-1][:top_k]
     kandidat_teratas = []
     for idx in urut_idx:
@@ -82,17 +89,58 @@ def prediksi_sampah(
     }
 
 
+def prediksi_sampah(
+    image_path: str,
+    mode: str = "edge",
+    model_path: str | None = None,
+    berat_kg: float = 1.0,
+    top_k: int = 3,
+) -> dict[str, Any]:
+    """Menjalankan prediksi sampah dalam Mode 'edge' (EfficientNet-B2) atau 'siglip' (SigLIP-SO400M + MLP2 Ensemble)."""
+    if mode == "edge":
+        target_model = model_path or "models/klasifikasi-sampah-v3.onnx"
+        if not os.path.exists(target_model):
+            raise FileNotFoundError(f"File model Edge tidak ditemukan: {target_model}")
+
+        session = ort.InferenceSession(target_model)
+        input_name = session.get_inputs()[0].name
+        tensor = preprocess_image_edge(image_path)
+        logits = session.run(None, {input_name: tensor})[0][0]
+        probs = softmax(logits)
+        return _format_hasil(probs, berat_kg, top_k)
+
+    if mode == "siglip":
+        target_model = model_path or "models/siglip_ens_mlp2_head.onnx"
+        if not os.path.exists(target_model):
+            raise FileNotFoundError(f"File head ONNX SigLIP tidak ditemukan: {target_model}")
+
+        emb = extract_siglip_embedding(image_path)
+        session = ort.InferenceSession(target_model)
+        input_name = session.get_inputs()[0].name
+        # Output siglip_ens_mlp2_head.onnx sudah berupa probabilitas rata-rata Softmax 5 seed
+        probs = session.run(None, {input_name: emb.astype(np.float32)})[0][0]
+        return _format_hasil(probs, berat_kg, top_k)
+
+    raise ValueError(f"Mode tidak dikenal: '{mode}'. Gunakan 'edge' atau 'siglip'.")
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Inferensi Klasifikasi Sampah TRASHURY (ONNX)")
+    parser = argparse.ArgumentParser(description="Inferensi Klasifikasi Sampah TRASHURY (Edge & High-Accuracy)")
     parser.add_argument("--image", type=str, required=True, help="Path ke file gambar sampah")
-    parser.add_argument("--model", type=str, default="models/klasifikasi-sampah-v3.onnx", help="Path ke model ONNX")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["edge", "siglip"],
+        default="edge",
+        help="Mode inferensi: 'edge' (EfficientNet-B2 29.4MB) atau 'siglip' (SigLIP-SO400M + MLP2 Ensemble)",
+    )
+    parser.add_argument("--model", type=str, default=None, help="Path kustom ke file model ONNX")
     parser.add_argument("--berat", type=float, default=1.0, help="Berat timbangan sampah dalam kg")
     args = parser.parse_args()
 
-    hasil = prediksi_sampah(args.image, args.model, args.berat)
-    utama = hasil["rekomendasi_utama"]
+    hasil = prediksi_sampah(args.image, mode=args.mode, model_path=args.model, berat_kg=args.berat)
 
-    print("=== HASIL PREDIKSI AI TRASHURY (Top-3 Smart Suggestion) ===")
+    print(f"=== HASIL PREDIKSI AI TRASHURY [Mode: {args.mode.upper()}] ===")
     for i, k in enumerate(hasil["kandidat_teratas"], start=1):
         tanda = " [REKOMENDASI UTAMA]" if i == 1 else ""
         print(

@@ -27,11 +27,11 @@ STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
 def preprocess_image(image_path: str) -> np.ndarray:
-    """Membaca gambar, mengubah ukuran ke 224x224, dan menerapkan normalisasi ImageNet."""
-    img = Image.open(image_path).convert("RGB").resize((224, 224))
+    """Membaca gambar, mengubah ukuran ke 260x260, dan menerapkan normalisasi ImageNet."""
+    img = Image.open(image_path).convert("RGB").resize((260, 260))
     arr = np.asarray(img, dtype=np.float32) / 255.0
     arr = (arr - MEAN) / STD
-    # Ubah dari HWC (224, 224, 3) ke NCHW (1, 3, 224, 224)
+    # Ubah dari HWC (260, 260, 3) ke NCHW (1, 3, 260, 260)
     tensor = np.transpose(arr, (2, 0, 1))[np.newaxis, ...]
     return tensor
 
@@ -43,7 +43,7 @@ def softmax(logits: np.ndarray) -> np.ndarray:
 
 def prediksi_sampah(
     image_path: str,
-    model_path: str = "models/klasifikasi-sampah-v1.onnx",
+    model_path: str = "models/klasifikasi-sampah-v3.onnx",
     berat_kg: float = 1.0,
     top_k: int = 3,
 ) -> dict[str, Any]:
@@ -85,7 +85,7 @@ def prediksi_sampah(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Inferensi Klasifikasi Sampah TRASHURY (ONNX)")
     parser.add_argument("--image", type=str, required=True, help="Path ke file gambar sampah")
-    parser.add_argument("--model", type=str, default="models/klasifikasi-sampah-v1.onnx", help="Path ke model ONNX")
+    parser.add_argument("--model", type=str, default="models/klasifikasi-sampah-v3.onnx", help="Path ke model ONNX")
     parser.add_argument("--berat", type=float, default=1.0, help="Berat timbangan sampah dalam kg")
     args = parser.parse_args()
 

@@ -17,8 +17,11 @@ Repositori ini menyediakan **dua mode arsitektur AI** untuk mengklasifikasikan *
 
 ```text
 trashury-ai-model/
-├── README.md                              # Dokumentasi arsitektur, evaluasi, dan panduan penggunaan
-├── requirements.txt                       # Dependensi Python untuk training & inferensi
+├── README.md                              # Dokumentasi arsitektur, evaluasi, dan panduan deploy
+├── app.py                                 # FastAPI Cloud AI Server (SigLIP-SO400M + MLP2 ONNX)
+├── Dockerfile                             # Docker image siap deploy ke Hugging Face Spaces (Port 7860)
+├── requirements-api.txt                   # Dependensi ringan khusus Cloud API (CPU-only)
+├── requirements.txt                       # Dependensi lengkap Python untuk training & inferensi CLI
 ├── .gitignore                             # Konfigurasi file yang diabaikan Git
 ├── inference.py                           # Skrip Python CLI untuk inferensi (--mode edge | --mode siglip)
 ├── models/
@@ -107,6 +110,43 @@ python inference.py --mode edge --image contoh_sampah.jpg --berat 2.5
 
 # 3. Mode High-Accuracy (SigLIP-SO400M + Multi-Seed MLP2 Head)
 python inference.py --mode siglip --image contoh_sampah.jpg --berat 2.5
+```
+
+---
+
+## 6. Deployment Cloud AI ke Hugging Face Spaces (Hybrid Cloud-Edge)
+
+**Live Demo & Cloud API:** [huggingface.co/spaces/afiqmc777/trashury-siglip-api](https://huggingface.co/spaces/afiqmc777/trashury-siglip-api) (`https://afiqmc777-trashury-siglip-api.hf.space`)
+
+Arsitektur **Hybrid Cloud-Edge** TRASHURY menjalankan:
+* **Cloud AI (Online):** `app.py` (`SigLIP-SO400M + MLP2 Ensemble`, akurasi **`96.03%`**) di-host gratis pada **Hugging Face Spaces** (*Gradio SDK + ZeroGPU Free*), sehingga **tidak membebani RAM 4 GiB VM Azure DTETI**.
+* **Edge AI (Offline / Fallback):** `models/klasifikasi-sampah-v3.onnx` (`EfficientNet-B2`, `29.41 MB`, akurasi **`88.89%`**) berjalan langsung di browser PWA via `onnxruntime-web` apabila perangkat sedang offline atau Cloud API timeout (> 5 detik).
+
+### Langkah Deploy ke Hugging Face Spaces (100% Gratis — Gradio SDK)
+1. Buka [huggingface.co/new-space](https://huggingface.co/new-space) dan buat Space baru:
+   * **Space name:** `trashury-siglip-api`
+   * **SDK:** pilih **Gradio** → template **Blank** *(Gratis — jangan pilih Docker karena berbayar)*
+   * **Hardware:** pilih **ZeroGPU (Free)** *(Gratis untuk akun Free tier; kode `app.py` sudah memakai `@spaces.GPU`)*
+2. Upload atau `git push` file berikut ke repositori Space tersebut:
+   * `app.py`
+   * `requirements-space.txt` *(ubah nama menjadi `requirements.txt` di Space)*
+   * `models/siglip_ens_mlp2_head.onnx`
+   * `models/labels.txt`
+3. Space aktif di `https://afiqmc777-trashury-siglip-api.hf.space`:
+   * **Web Demo UI:** [huggingface.co/spaces/afiqmc777/trashury-siglip-api](https://huggingface.co/spaces/afiqmc777/trashury-siglip-api)
+   * **Gradio API Endpoint:** `/predict` (via `@gradio/client` atau `gradio_client`)
+
+### Contoh Integrasi Frontend JavaScript/TypeScript (`@gradio/client`)
+```ts
+import { Client, handle_file } from "@gradio/client";
+
+const client = await Client.connect("afiqmc777/trashury-siglip-api");
+const result = await client.predict("/predict", {
+  image: handle_file(imageBlob),
+  berat_kg: 2.5,
+});
+// result.data[1] berisi JSON detail prediksi (mode, kandidat_teratas, peringatan_kontaminasi, estimasi_rupiah, estimasi_co2e_kg)
+console.log(result.data[1]);
 ```
 
 ---
